@@ -1,0 +1,1532 @@
+---
+title: "Cleaning_Explore"
+output: html_document
+date: "2023-10-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+# Make a test dataset
+df <- data.frame(col1 = c(1, 2, NA), col2 = c(1, 2, 3), col3 = c(NA, 1, 2))
+
+# Remove rows with NAs on a variable basis
+# Gets rid of the NA row in column three
+cleaned_df1 <- df[!is.na(df$col3), ]
+
+# Remove all rows with NAs
+# Gets rid of the NA rows in columns three and one. 
+cleaned_df2 <- na.omit(df)
+```
+
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+
+# We first start by exploring the number of sites
+```{r pressure, echo=FALSE}
+library(tidyverse)
+library(readxl)
+
+sites <- read_xlsx("July-2023-Hazardous-Site-Inventory.xlsx")
+
+# Display the number of sites by year
+sites %>%
+  filter(`Investigation/ Cleanup Funding` != "RP") %>%
+  separate_wider_delim(`List Date`, delim = "-", names = c("year"), too_many ="drop") %>%
+  ggplot(aes(x = year, fill = `Investigation/ Cleanup Funding`)) +
+  geom_histogram(stat = "count") +
+  labs(title = "Number of Sites & Responsible Party by Year",
+       x = "Year")
+
+# Change to year
+sites <- sites %>%
+  filter(`Investigation/ Cleanup Funding` != "RP") %>%
+  separate_wider_delim(`List Date`, delim = "-", names = c("year"), too_many ="drop")
+
+sites$year <- as.numeric(sites$year)
+
+# Get some basic info
+sites %>%
+  filter(year >= 2001 & year <= 2018) %>%
+  count(`Investigation/ Cleanup Funding`)
+
+sites %>%
+  filter(year >= 2001 & year <= 2018) %>%
+  count(Class)
+
+sites_2001_2018_filtered <- sites %>%
+  filter(year >= 2001 & year <= 2018)
+
+
+write.csv(sites, "sites_of_interest.csv")
+```
+There are a total of 196 sites that can obtain the funding that we are investigating.
+
+For the time window after 2001, we have 93 sites, 
+17 of those are abandoned.
+75 are public landfills.
+
+Class breakdown: 
+9 class one
+10 class two
+70 class four
+3 class five
+
+# Now we want to look into how the population changed relative to the date of the spill
+Population data goes back to 1999. Thus, we will include sites up to 2002 and obtain a window of pm 2 years.
+
+We will also exclude the year 2021 and 2022 due to COVID
+
+```{r}
+# Clean up the long populatin dataset
+long_population <- read_xlsx("health/Population_1999-2022.xlsx", skip = 1) %>%
+  filter(!is.na(Geography)) %>%
+  select(!`Selected Years Total`) %>%
+  pivot_longer(cols = "1999":"2022", values_to = "population", names_to = "year")
+
+long_population$year <- as.numeric(long_population$year)
+long_population$population <- str_replace_all(long_population$population, ",", "")
+long_population$population <- as.numeric(long_population$population)
+
+# Calculate the year to year difference
+# Sort to ensure that it is in order
+long_population %>%
+  arrange(Geography, year) %>%
+  mutate(prev_year = lag(population)) %>%
+  mutate(population_diff = population - prev_year) %>%
+  mutate(percent_different = (population_diff / prev_year) * 100) %>%
+  # Then we filter out 1999 because those will not be right
+  filter(year != 1999) %>%
+  ggplot(aes(x = as.factor(year), y = percent_different)) +
+  geom_boxplot() +
+  labs(title = "Change in Population Over Time",
+       x = "Year",
+       y = "Percent (%) Change")
+
+calculated_population <- long_population %>%
+  arrange(Geography, year) %>%
+  mutate(prev_year = lag(population)) %>%
+  mutate(population_diff = population - prev_year) %>%
+  mutate(percent_different = (population_diff / prev_year) * 100) %>%
+  filter(year != 1999)
+
+write.csv(calculated_population, "population_statistics_2000-2022.csv")
+```
+
+## Now we will join with the other dataset
+
+Within this join we retain 90/93 sites
+```{r}
+hist(calculated_population$percent_different, na.rm = T)
+
+sites_2001_2018_filtered <- sites_2001_2018_filtered %>%
+  rename(c("year_site" = "year"))
+
+# We have 90/93 sites represented
+sites_2001_2018_filtered %>%
+  inner_join(calculated_population, by = c("County" ="Geography")) %>%
+  select(`HSI #`) %>%
+  unique() %>%
+  count()
+
+pop_change_final_set <- sites_2001_2018_filtered %>%
+  inner_join(calculated_population, by = c("County" ="Geography"))
+
+pop_change_final_set$year_to_site <- (pop_change_final_set$year_site - pop_change_final_set$year)
+
+pop_change_final_set %>%
+  filter(year_to_site <= 2 & year_to_site >= -2) %>%
+  ggplot(aes(x = factor(year_to_site), y = percent_different, fill = Class)) +
+  geom_boxplot() +
+  geom_jitter(alpha = .1) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Percent Change in Population x Years Before Site Appearance",
+       x = "n Year Till Site Appear",
+       y = "Percent Difference Relative to Previous Year")
+```
+
+I won't even bothering doing stat tests... Unlikely to find sig. change
+
+# I will now begin to explore health variables
+## Start with ADRD
+
+```{r}
+ADRD <- read_xlsx("health/ADRD_1999-2022.xlsx", skip = 1) %>%
+  filter(!is.na(Geography)) %>%
+  select(!`Selected Years Total`) %>%
+  pivot_longer(cols = "1999":"2022", values_to = "deaths", names_to = "year")
+
+ADRD$year <- as.numeric(ADRD$year)
+
+ADRD <- ADRD %>%
+  left_join(long_population, by = c("Geography" = "Geography", "year" = "year"))
+
+ADRD$deaths <- str_replace_all(ADRD$deaths, ",", "")
+
+ADRD$deaths <- as.numeric(ADRD$deaths)
+
+ADRD <- ADRD %>%
+  mutate(rate = (deaths / population) * 100)
+
+ADRD %>%
+  arrange(Geography, year) %>%
+  ggplot(aes(x = as.factor(year), y = rate)) +
+  geom_boxplot() +
+  labs(title = "ADRD Rate by Year",
+       x = "Year",
+       y = "Percent Death by Population")
+```
+## Look at the time-based change. Calculate the change from year to year
+(90/93)
+```{r}
+ADRD_joined <- sites_2001_2018_filtered %>%
+  inner_join(ADRD, by = c("County" ="Geography"))
+
+mean((ADRD %>%
+  anti_join(sites_2001_2018_filtered, by = c("Geography" ="County")) %>%
+  arrange(Geography, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1999) %>%
+    filter(percent_different != Inf) %>%
+    filter(population > 1000))$percent_different, na.rm = T)
+
+# We note the extremely high SD and will explore its origins at a later date
+sd((ADRD %>%
+  anti_join(sites_2001_2018_filtered, by = c("Geography" ="County")) %>%
+  arrange(Geography, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1999) %>%
+    filter(percent_different != Inf) %>%
+    filter(population > 1000))$percent_different, na.rm = T)
+
+ADRD_joined <- ADRD_joined %>%
+  arrange(County, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1999)
+
+ADRD_joined$year_to_site <- (ADRD_joined$year_site - ADRD_joined$year)
+
+pop_change_final_set %>%
+  filter(year_to_site <= 7 & year_to_site >= -5) %>%
+  ggplot(aes(x = factor(year_to_site), y = percent_different, fill = Class)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 18.2, color = "red") +
+  labs(title = "Percent Change in ADRD rate x Years Before Site Appearance",
+       x = "n Year Till Site Appear",
+       y = "Percent Difference Relative to Previous Year")
+
+write.csv(ADRD_joined, "ADRD_deaths_2000-2022.csv")
+```
+
+## Next we Look at Alzheimers 
+```{r}
+ADRD <- read_xlsx("health/Alzheimers_1999-2022.xlsx", skip = 1) %>%
+  filter(!is.na(Geography)) %>%
+  select(!`Selected Years Total`) %>%
+  pivot_longer(cols = "1999":"2022", values_to = "deaths", names_to = "year")
+
+ADRD$year <- as.numeric(ADRD$year)
+
+ADRD <- ADRD %>%
+  left_join(long_population, by = c("Geography" = "Geography", "year" = "year"))
+
+ADRD$deaths <- str_replace_all(ADRD$deaths, ",", "")
+
+ADRD$deaths <- as.numeric(ADRD$deaths)
+
+ADRD <- ADRD %>%
+  mutate(rate = (deaths / population) * 100)
+
+ADRD %>%
+  arrange(Geography, year) %>%
+  ggplot(aes(x = as.factor(year), y = rate)) +
+  geom_boxplot() +
+  labs(title = "Alzheimers Rate by Year",
+       x = "Year",
+       y = "Percent Alzheimers by Population")
+```
+
+```{r}
+ADRD_joined <- sites_2001_2018_filtered %>%
+  inner_join(ADRD, by = c("County" ="Geography"))
+
+mean((ADRD %>%
+  anti_join(sites_2001_2018_filtered, by = c("Geography" ="County")) %>%
+  arrange(Geography, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1999) %>%
+    filter(percent_different != Inf) %>%
+    filter(population > 1000))$percent_different, na.rm = T)
+
+# We note the extremely high SD and will explore its origins at a later date
+sd((ADRD %>%
+  anti_join(sites_2001_2018_filtered, by = c("Geography" ="County")) %>%
+  arrange(Geography, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1999) %>%
+    filter(percent_different != Inf) %>%
+    filter(population > 1000))$percent_different, na.rm = T)
+
+ADRD_joined <- ADRD_joined %>%
+  arrange(County, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1999)
+
+ADRD_joined$year_to_site <- (ADRD_joined$year_site - ADRD_joined$year)
+
+pop_change_final_set %>%
+  filter(year_to_site <= 5 & year_to_site >= -5) %>%
+  ggplot(aes(x = factor(year_to_site), y = percent_different, fill = Class)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 106.12, color = "red") +
+  labs(title = "Percent Change in Alzheimers rate x Years Before Site Appearance",
+       x = "n Year Till Site Appear",
+       y = "Percent Difference Relative to Previous Year")
+
+write.csv(ADRD_joined, "Alzheimers_rate_2000-2022.csv")
+```
+
+Situation of actually more cases or are there simply more being reported per capita?
+
+Maybe a better method for analysis will use Regression discontinuity for group of sites impacted one year, and then compare to another?
+
+This mostly about cleaning and explore so OK. 
+
+## Finally, we look at infant deaths
+```{r}
+ADRD <- read_xlsx("health/Infant_Mortality_1994-2022.xlsx", skip = 1) %>%
+  filter(!is.na(Geography)) %>%
+  select(!`Selected Years Total`) %>%
+  pivot_longer(cols = "1994":"2022", values_to = "rate", names_to = "year")
+
+ADRD$year <- as.numeric(ADRD$year)
+
+ADRD <- ADRD %>%
+  left_join(long_population, by = c("Geography" = "Geography", "year" = "year"))
+
+ADRD$rate <- str_replace_all(ADRD$rate, ",", "")
+
+# note that lots of NA values
+ADRD$rate <- as.numeric(ADRD$rate)
+
+ADRD %>%
+  arrange(Geography, year) %>%
+  ggplot(aes(x = as.factor(year), y = rate)) +
+  geom_boxplot() +
+  labs(title = "Infant Mortality by Year",
+       x = "Year",
+       y = "Percent Death by Population")
+```
+We note the steady decline
+
+```{r}
+ADRD_joined <- sites_2001_2018_filtered %>%
+  inner_join(ADRD, by = c("County" ="Geography"))
+
+ADRD_joined <- ADRD_joined %>%
+  drop_na()
+
+# 4.6
+mean((ADRD %>%
+  anti_join(sites_2001_2018_filtered, by = c("Geography" ="County")) %>%
+  arrange(Geography, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1994) %>%
+    filter(percent_different != Inf) %>%
+    filter(population > 1000))$percent_different, na.rm = T)
+
+# We note the extremely high SD and will explore its origins at a later date
+sd((ADRD %>%
+  anti_join(sites_2001_2018_filtered, by = c("Geography" ="County")) %>%
+  arrange(Geography, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1994) %>%
+    filter(percent_different != Inf) %>%
+    filter(population > 1000))$percent_different, na.rm = T)
+
+ADRD_joined <- ADRD_joined %>%
+  arrange(County, year) %>%
+  mutate(prev_rate = lag(rate)) %>%
+  mutate(rate_diff = rate - prev_rate) %>%
+  mutate(percent_different = (rate_diff / prev_rate) * 100) %>%
+  filter(year != 1994)
+
+ADRD_joined$year_to_site <- (ADRD_joined$year_site - ADRD_joined$year)
+
+pop_change_final_set %>%
+  filter(year_to_site <= 5 & year_to_site >= -5) %>%
+  ggplot(aes(x = factor(year_to_site), y = percent_different, fill = Class)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 5.4, color = "red") +
+  labs(title = "Percent Change in Infant Mortality rate x Years Before Site Appearance",
+       x = "n Year Till Site Appear",
+       y = "Percent Difference Relative to Previous Year")
+
+write.csv(ADRD_joined, "Infant_Mortality_2000-2022.csv")
+```
+
+# Grouping Together Similar Counties
+```{r}
+summarypop <- calculated_population %>%
+  group_by(Geography) %>%
+  summarise(avg_pop = mean(population))
+
+quantile(summarypop$avg_pop, na.rm=TRUE, probs = c(0,.2,.4,.6,.8,1))
+
+pop_quantiles <- quantile(summarypop$avg_pop, na.rm=TRUE, probs = c(0,.2,.4,.6,.8,1))
+
+# Create a new column with percentile categories
+summarypop <- summarypop %>%
+  mutate(percentile_category = case_when(
+    avg_pop <= pop_quantiles[2] ~ "very low",
+    avg_pop <= pop_quantiles[3] & avg_pop > pop_quantiles[2] ~ "low",
+    avg_pop <= pop_quantiles[4] & avg_pop > pop_quantiles[3] ~ "medium",
+    avg_pop <= pop_quantiles[5] & avg_pop > pop_quantiles[4] ~ "high",
+    avg_pop > pop_quantiles[5] ~ "very high"
+  ))
+
+race2020 <- read.csv("Race_2020.csv", skip = 1)
+
+race2020$Geographic.Area.Name <- str_replace(race2020$Geographic.Area.Name, " County, Georgia", "")
+
+percentblack <- race2020 %>%
+  mutate(percent_black = (Estimate..Total...Black.or.African.American.alone / Estimate..Total.) * 100) %>%
+  dplyr::select(Geographic.Area.Name, percent_black) %>%
+  rename(c("Geography"="Geographic.Area.Name"))
+
+summarypop <- summarypop %>%
+  left_join(percentblack) %>%
+  drop_na()
+
+summarypop <- summarypop %>%
+  rename(c("population_category"="percentile_category"))
+
+# Calculate quantiles for percent_black
+black_quantiles <- quantile(summarypop$percent_black, na.rm=TRUE, probs = c(0,.2,.4,.6,.8,1))
+
+# Create a new column with percentile categories based on percent_black
+summarypop <- summarypop %>%
+  mutate(black_percentile_category = case_when(
+    percent_black <= black_quantiles[2] ~ "very low",
+    percent_black <= black_quantiles[3] & percent_black > black_quantiles[2] ~ "low",
+    percent_black <= black_quantiles[4] & percent_black > black_quantiles[3] ~ "medium",
+    percent_black <= black_quantiles[5] & percent_black > black_quantiles[4] ~ "high",
+    percent_black > black_quantiles[5] ~ "very high"
+  ))
+
+poverty2020 <- read.csv("Poverty_2020.csv", skip = 1)
+
+poverty2020$Geographic.Area.Name <- str_replace(poverty2020$Geographic.Area.Name, " County, Georgia", "")
+
+percentpoor <- poverty2020 %>%
+  mutate(poverty_rate = (`Estimate..Below.poverty.level..Population.for.whom.poverty.status.is.determined` / Estimate..Total..Population.for.whom.poverty.status.is.determined) * 100) %>%
+  select(Geographic.Area.Name, poverty_rate) %>%
+  rename(c("Geography"="Geographic.Area.Name"))
+
+  
+  summarypop <- summarypop %>%
+  left_join(percentpoor) %>%
+  drop_na()
+  
+  # Calculate quantiles for percentpoor
+poor_quantiles <- quantile(summarypop$poverty_rate, na.rm=TRUE, probs = c(0,.2,.4,.6,.8,1))
+
+# Create a new column with percentile categories based on poverty_rate
+summarypop <- summarypop %>%
+  mutate(poor_percentile_category = case_when(
+    poverty_rate <= poor_quantiles[2] ~ "very low",
+    poverty_rate <= poor_quantiles[3] & poverty_rate > poor_quantiles[2] ~ "low",
+    poverty_rate <= poor_quantiles[4] & poverty_rate > poor_quantiles[3] ~ "medium",
+    poverty_rate <= poor_quantiles[5] & poverty_rate > poor_quantiles[4] ~ "high",
+    poverty_rate > poor_quantiles[5] ~ "very high"
+  ))
+
+education_2020 <- read.csv("Education_2020.csv", skip = 1)
+
+education_2020$Geographic.Area.Name <- str_replace(education_2020$Geographic.Area.Name, " County, Georgia", "")
+
+education_2020 <- education_2020 %>%
+  rename_with(~ gsub("\\.\\.", ".", .x))
+
+# Replace 'your_dataframe' with the actual name of your data frame
+education_2020 <- education_2020 %>%
+  mutate(
+    age_18_24_score = (
+      0 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.18.to.24.years.Less.than.high.school.graduate +
+      1 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.18.to.24.years.High.school.graduate.includes.equivalency. +
+      2 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.18.to.24.years.Some.college.or.associate.s.degree +
+      3 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.18.to.24.years.Bachelor.s.degree.or.higher
+    ) / Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.18.to.24.years
+  )
+
+# Assuming the data frame is named 'education_2020'
+education_2020$Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.18.to.24.years.High.school.graduate.includes.equivalency.
+
+education_2020 <- education_2020 %>%
+  mutate(
+    educational_score_25_over = (
+      0 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.Less.than.9th.grade +
+      0 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.9th.to.12th.grade.no.diploma +
+      1 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.High.school.graduate.includes.equivalency. +
+      2 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.Some.college.no.degree +
+      2 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.Associate.s.degree +
+      3 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.Bachelor.s.degree +
+      4 * Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over.Graduate.or.professional.degree
+    ) / Estimate.Total.AGE.BY.EDUCATIONAL.ATTAINMENT.Population.25.years.and.over
+  )
+
+educationscores <- education_2020 %>%
+  select(!"Geography") %>%
+  rename(c("Geography"="Geographic.Area.Name")) %>%
+  select(Geography, age_18_24_score, educational_score_25_over)
+
+summarypop <- summarypop %>%
+  left_join(educationscores) %>%
+  drop_na()
+
+summarypop
+
+# Calculate quantiles for age_18_24_score
+age_18_24_quantiles <- quantile(summarypop$age_18_24_score, na.rm = TRUE, probs = c(0, .2, .4, .6, .8, 1))
+
+# Create a new column with percentile categories based on age_18_24_score
+summarypop <- summarypop %>%
+  mutate(age_18_24_percentile_category = case_when(
+    age_18_24_score <= age_18_24_quantiles[2] ~ "very low",
+    age_18_24_score <= age_18_24_quantiles[3] & age_18_24_score > age_18_24_quantiles[2] ~ "low",
+    age_18_24_score <= age_18_24_quantiles[4] & age_18_24_score > age_18_24_quantiles[3] ~ "medium",
+    age_18_24_score <= age_18_24_quantiles[5] & age_18_24_score > age_18_24_quantiles[4] ~ "high",
+    age_18_24_score > age_18_24_quantiles[5] ~ "very high"
+  ))
+
+# Calculate quantiles for educational_score_25_over
+educational_score_25_over_quantiles <- quantile(summarypop$educational_score_25_over, na.rm = TRUE, probs = c(0, .2, .4, .6, .8, 1))
+
+# Create a new column with percentile categories based on educational_score_25_over
+summarypop <- summarypop %>%
+  mutate(educational_score_25_over_percentile_category = case_when(
+    educational_score_25_over <= educational_score_25_over_quantiles[2] ~ "very low",
+    educational_score_25_over <= educational_score_25_over_quantiles[3] & educational_score_25_over > educational_score_25_over_quantiles[2] ~ "low",
+    educational_score_25_over <= educational_score_25_over_quantiles[4] & educational_score_25_over > educational_score_25_over_quantiles[3] ~ "medium",
+    educational_score_25_over <= educational_score_25_over_quantiles[5] & educational_score_25_over > educational_score_25_over_quantiles[4] ~ "high",
+    educational_score_25_over > educational_score_25_over_quantiles[5] ~ "very high"
+  ))
+
+sites_summary <- sites %>%
+  group_by(County, Class) %>%
+  summarise(sites_count = n(), .groups = 'drop')
+
+# Left join the summarypop data frame with the sites_summary
+summarypop <- summarypop %>%
+  left_join(sites_summary, by = c("Geography" = "County"))
+
+# Yrs
+sites_summary_yrs <- sites %>%
+  group_by(County) %>%
+  summarise(years = toString(sort(unique(year))), # This creates a list of years for each group
+            .groups = 'drop')
+
+summarypop <- summarypop %>%
+  left_join(sites_summary_yrs, by = c("Geography" = "County"))
+
+# Spread the sites_count into separate columns for each Class
+summarypop <- summarypop %>%
+  pivot_wider(names_from = Class, values_from = sites_count, values_fill = list(sites_count = 0))
+
+summarypop <- summarypop %>%
+  select(!"NA") %>%
+  group_by(Geography) %>%
+  mutate(total_sites = sum(I, IV, II, V))
+```
+# Test visuals
+```{r}
+library(ggplot2)
+# First, fit the linear model to get the coefficients and R squared
+fit <- lm(poverty_rate ~ percent_black, data = summarypop)
+coefficients <- coef(fit)
+r_squared <- summary(fit)$r.squared
+
+# Create the scatter plot
+p <- ggplot(summarypop, aes(x = percent_black, y = poverty_rate)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "blue") +
+  geom_vline(xintercept = quantile(summarypop$percent_black, probs = c(0.2, 0.4, 0.6, 0.8)),
+             linetype = "dashed", color = "blue", alpha = 0.5) +
+  geom_hline(yintercept = quantile(summarypop$poverty_rate, probs = c(0.2, 0.4, 0.6, 0.8)),
+             linetype = "dashed", color = "red", alpha = 0.5) +
+  theme_minimal() +
+  labs(x = "Percentage Black", y = "Poverty Rate", 
+       title = "Scatter Plot with Regression Line")
+
+# Annotate with the equation and R^2
+equation_label <- paste0("y = ", round(coefficients[1], 2), 
+                         " + ", round(coefficients[2], 2), "x, R² = ", round(r_squared, 2))
+
+p + annotate("text", x = max(summarypop$percent_black), y = min(summarypop$poverty_rate),
+             label = equation_label, hjust = 1, vjust = -1, color = "blue")
+
+
+```
+
+# Some cool visuals
+```{r}
+library(ggplot2)
+library(GGally)
+
+colnames(summarypop)
+
+# Histogram of Total Sites
+ggplot(summarypop, aes(x = total_sites)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  labs(x = "Total Chemical Spill Sites", y = "Count of Counties",
+       title = "Distribution of Chemical Spill Sites across Counties")
+
+# Scatter Plot of Average Population vs. Percent Black, colored by Total Sites
+ggplot(summarypop, aes(x = avg_pop, y = percent_black, color = total_sites)) +
+  geom_point() +
+  scale_color_gradient(low = "yellow", high = "red") +
+  theme_minimal() +
+  labs(x = "Average Population", y = "Percent Black",
+       title = "Comparing County Characteristics with Total Spill Sites")
+
+summarypop$SitesCategory <- ifelse(summarypop$total_sites > 0, ">1 Site", "0-1 Site")
+
+# Correlation plot of selected variables
+corr_plot <- ggpairs(summarypop[, c("avg_pop", "percent_black", "poverty_rate", "total_sites", "educational_score_25_over")])
+
+# Create a factor variable based on total_sites
+summarypop$SitesCategory <- ifelse(summarypop$total_sites >= 1, ">=1 Site", "0 Site")
+
+# Use ggpairs with the coloring condition
+corr_plot <- ggpairs(summarypop,
+        columns = c("avg_pop", "percent_black", "poverty_rate", "educational_score_25_over"),
+        aes(color = SitesCategory)) +
+  scale_color_manual(values = c("0 Site" = "blue", ">=1 Site" = "red")) +
+  labs(title = "Correlation Plot of County-Level Variables")
+
+ggsave("corr.png", corr_plot, height = 7, width = 12)
+```
+
+
+```{r}
+colnames(summarypop)
+
+summarypop$group_identifier <- with(summarypop, interaction(
+  population_category,
+  black_percentile_category,
+  poor_percentile_category,
+  educational_score_25_over_percentile_category,
+  drop = TRUE # this will drop any unused levels
+))
+
+summarypop$group_identifier <- as.character(summarypop$group_identifier)
+
+summarypop_wide <- summarypop %>%
+  group_by(group_identifier, SitesCategory) %>%
+  count() %>%
+  pivot_wider(names_from = SitesCategory, values_from = n, values_fill = list(n = 0)) %>%
+  filter(`>=1 Site` > 0 & `0 Site` > 0) 
+
+unique_identifiers <- unique(summarypop_wide$group_identifier)
+
+# Step 2: Filter the summarypop dataframe to include only the selected identifiers
+selected_summarypop <- summarypop %>%
+  filter(group_identifier %in% unique_identifiers)
+
+# Step 3: Split the filtered summarypop into a list of dataframes
+list_of_dfs <- split(selected_summarypop, selected_summarypop$group_identifier)
+
+# Optional: Clean up the names of the list elements if needed
+names(list_of_dfs) <- sub("group_identifier=", "", names(list_of_dfs))
+```
+
+# Now we have a list of DFs that have are binned together => Run RD
+```{r}
+infant <- read_xlsx("health/Infant_Mortality_1994-2022.xlsx", skip = 1) %>%
+  filter(!is.na(Geography)) %>%
+  select(!`Selected Years Total`) %>%
+  pivot_longer(cols = "1994":"2022", values_to = "rate", names_to = "year")
+
+infant$year <- as.numeric(infant$year)
+
+infant$rate <- str_replace_all(infant$rate, ",", "")
+
+# note that lots of NA values
+infant$rate <- as.numeric(infant$rate)
+
+summarypop
+
+summarypop_infant <- infant %>%
+  left_join(summarypop)
+
+# Create binary variables for each intervention year
+# For each row, check if the 'year' is greater than or equal to each intervention year
+summarypop_long <- summarypop_infant %>%
+  separate_rows(years, sep = ",") %>%
+  mutate(years = as.numeric(years))
+
+summarypop_long <- summarypop_long %>%
+  group_by(Geography, year) %>%
+  mutate(treated = ifelse(!is.na(years) & year >= years, 1, 0)) %>%
+  ungroup()
+
+# Create a 'post' column for each unique 'years' value
+# This will be a wide format dataset where each intervention year has its own 'post' column
+summarypop_wide <- summarypop_long %>%
+  pivot_wider(names_from = years, values_from = treated, names_prefix = "post_")
+
+treated_df_joiner <- summarypop_infant %>%
+  mutate(treated = ifelse(!is.na(years), 1, 0)) %>%
+  select(Geography, years, treated) %>%
+  unique()
+
+# Replace NA with 0 for the 'post_' columns only, which are expected to be numeric
+post_columns <- grep("^post_", names(summarypop_wide), value = TRUE)
+summarypop_wide[post_columns] <- lapply(summarypop_wide[post_columns], function(x) replace(x, is.na(x), 0))
+
+summarypop_wide <- summarypop_wide %>%
+  drop_na()
+
+write.csv(summarypop_wide %>%
+  filter(Geography %in% list_of_dfs[[1]]$Geography) %>%
+    left_join(treated_df_joiner, by = c("Geography" = "Geography")), "test.csv")
+```
+
+# DID testing 1
+```{r}
+library(lmtest)
+library(sandwich)
+library(stargazer)
+library(lfe)
+
+results_df <- data.frame(Year = integer(), CountySite = character(), Estimate1 = numeric(), P_Value1 = numeric(),
+                         Estimate2 = numeric(), P_Value2 = numeric(),
+                         Estimate3 = numeric(), P_Value3 = numeric(),
+                         Estimate4 = numeric(), P_Value4 = numeric(),
+                         Estimate5 = numeric(), P_Value5 = numeric())
+
+for (i in 1:length(list_of_dfs)){
+  summarypop_wide_temp <- summarypop_wide %>%
+    filter(Geography %in% list_of_dfs[[i]]$Geography)
+  
+  summarypop_wide_temp <- summarypop_wide_temp %>%
+    left_join(treated_df_joiner, by = c("Geography" = "Geography"))
+  
+  counties_with_site <- summarypop_wide_temp %>%
+    select(Geography, total_sites) %>%
+    unique()
+  
+  counties_without_site <- counties_with_site %>%
+    filter(total_sites == 0)
+  
+  counties_without_site <- counties_without_site$Geography
+  
+  counties_with_site <- counties_with_site %>%
+    filter(total_sites > 0)
+  
+  counties_with_site <- counties_with_site$Geography
+  
+  for (countysite in counties_with_site){
+    # Extract the years
+    yrs_to_loop <- summarypop_wide_temp %>%
+      filter(Geography == countysite) %>%
+      select(years) %>%
+      unique()
+
+     # loop through years
+    for (year in (unlist(strsplit(yrs_to_loop$years[1], ", ")))){
+      yrindf <- year
+      
+      selection_for_post <- paste("post", year, sep = "_")
+      
+      selection_for_post_sym <- rlang::sym(selection_for_post)
+      
+      # Create the df to run DiD regression
+      did_df <- summarypop_wide_temp %>%
+        select(Geography, !!selection_for_post_sym, treated, rate, year) %>%
+        filter(Geography %in% c(counties_without_site, c(countysite)))
+      
+      did_df$thepost <- did_df$year >=  year
+      
+      did_df$year_fct <- as.factor(did_df$year)
+
+      # Create a time-since-treatment variable (event time)
+      did_df$time_since_treatment <- did_df$year - as.numeric(year)
+      
+      cap_year <- -5
+      did_df$time_since_treatment <- ifelse(did_df$time_since_treatment < cap_year, cap_year, did_df$time_since_treatment)
+
+      # Calculate the time since treatment
+      did_df <- did_df %>%
+        mutate(
+          time_since_treatment = year - as.numeric(yrindf),
+          # Create a capped time_since_treatment variable for up to 5 years after the treatment
+          capped_time_since_treatment = pmin(time_since_treatment, 5),
+          # Ensure that the capped_time_since_treatment doesn't go below zero
+          capped_time_since_treatment = pmax(capped_time_since_treatment, 0)
+        )
+      
+      # Create the interaction terms
+      for(i in 1:5) {
+        did_df[paste0("post_treatment_year", i)] <- ifelse(did_df$time_since_treatment == i, 1, 0)
+        did_df[paste0("treatedXpost_year", i)] <- did_df$treated * did_df[paste0("post_treatment_year", i)]
+      }
+      
+      # Build the model formula
+      # Start with the rate ~ treated + capped_time_since_treatment
+      model_formula <- "rate ~ treated + capped_time_since_treatment"
+      
+      # Add the interaction terms to the formula
+      for(i in 1:5) {
+        model_formula <- paste(model_formula, paste0("+ treatedXpost_year", i))
+      }
+      
+      # Convert the formula text to an actual formula
+      model_formula <- as.formula(model_formula)
+      
+      # Run the regression model
+      model <- lm(model_formula, data = did_df)
+      
+      # Display the summary of the model
+      summary_model <- summary(model)
+      
+      # Extract the coefficients table
+      coefficients_table <- summary_model$coefficients
+      
+      # Locate the row of the interaction term, which should contain ':'
+      interaction_row1 <- grep("treatedXpost_year1", rownames(coefficients_table))
+      interaction_row2 <- grep("treatedXpost_year2", rownames(coefficients_table))
+      interaction_row3 <- grep("treatedXpost_year3", rownames(coefficients_table))
+      interaction_row4 <- grep("treatedXpost_year4", rownames(coefficients_table))
+      interaction_row5 <- grep("treatedXpost_year5", rownames(coefficients_table))
+      
+      # Extract the estimate and p-value for the interaction term
+      if (length(interaction_row1) > 0) {
+        interaction_estimate1 <- coefficients_table[interaction_row1, "Estimate"]
+        interaction_p_value1 <- coefficients_table[interaction_row1, "Pr(>|t|)"]
+      } else {
+        interaction_estimate1 <- NA
+        interaction_p_value1 <- NA
+      }
+      
+      if (length(interaction_row2) > 0) {
+        interaction_estimate2 <- coefficients_table[interaction_row2, "Estimate"]
+        interaction_p_value2 <- coefficients_table[interaction_row2, "Pr(>|t|)"]
+      } else {
+        interaction_estimate2 <- NA
+        interaction_p_value2 <- NA
+      }
+      
+      if (length(interaction_row3) > 0) {
+        interaction_estimate3 <- coefficients_table[interaction_row3, "Estimate"]
+        interaction_p_value3 <- coefficients_table[interaction_row3, "Pr(>|t|)"]
+      } else {
+        interaction_estimate3 <- NA
+        interaction_p_value3 <- NA
+      }
+      
+      if (length(interaction_row4) > 0) {
+        interaction_estimate4 <- coefficients_table[interaction_row4, "Estimate"]
+        interaction_p_value4 <- coefficients_table[interaction_row4, "Pr(>|t|)"]
+      } else {
+        interaction_estimate4 <- NA
+        interaction_p_value4 <- NA
+      }
+      
+      if (length(interaction_row5) > 0) {
+        interaction_estimate5 <- coefficients_table[interaction_row5, "Estimate"]
+        interaction_p_value5 <- coefficients_table[interaction_row5, "Pr(>|t|)"]
+      } else {
+        interaction_estimate5 <- NA
+        interaction_p_value5 <- NA
+      }
+            
+      
+      
+      if (length(unique(did_df$treated)) > 1){
+        new_row <- data.frame(Year = year, CountySite = countysite, 
+                              Estimate1 = interaction_estimate1, P_Value1 = interaction_p_value1,
+                              Estimate2 = interaction_estimate2, P_Value2 = interaction_p_value2,
+                              Estimate3 = interaction_estimate3, P_Value3 = interaction_p_value3,
+                              Estimate4 = interaction_estimate4, P_Value4 = interaction_p_value4,
+                              Estimate5 = interaction_estimate5, P_Value5 = interaction_p_value5)
+        results_df <- rbind(results_df, new_row)
+      }
+      
+    }
+    
+  }
+}
+
+colnames(results_df)
+
+results_df
+
+longer_results_df <- results_df %>%
+  pivot_longer(
+    cols = -c(CountySite, Year), # Assuming you have some ID column that you want to keep
+    names_to = c(".value", "year"),
+    names_pattern = "(Estimate|P_Value)(\\d+)"
+  ) %>%
+  # Convert the 'year' to a numeric value if needed
+  mutate(year = as.numeric(year)) %>%
+  rename(c("Year_After_Site"= "year"))
+
+longer_results_df %>%
+  ggplot(aes(x = Year_After_Site, y = Estimate, color = P_Value)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red")
+
+ggplot(longer_results_df, aes(x = Year_After_Site, y = Estimate, fill = as.factor(sign(Estimate)))) +
+  geom_col() +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  scale_fill_manual(values = c("-1" = "blue", "1" = "orange"), labels = c("Below Zero", "Above Zero")) +
+  labs(fill = "Estimate Sign") +
+  theme_minimal()
+
+longer_results_df %>%
+  drop_na()
+```
+
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(scales) 
+
+longer_results_df <- results_df %>%
+  pivot_longer(
+    cols = -c(CountySite, Year), # Exclude identifier columns
+    names_to = c(".value", "number"), # Change 'year' to 'number' to avoid confusion with 'Year' column
+    names_pattern = "(Estimate|P_Value)(\\d+)" # Separate Estimate/P_Value from the number
+  ) %>%
+  mutate(number = as.numeric(number)) %>%
+  rename(Year_After_Site = number) %>%
+  mutate(P_Value_Scaled = -log10(P_Value)) %>%
+  drop_na()# Scale the P_Value for color gradient
+
+bar_data <- longer_results_df %>%
+  group_by(Year_After_Site) %>%
+  summarize(
+    Above_Zero = sum(Estimate > 0, na.rm = T) / 200,
+    Below_Zero = sum(Estimate < 0, na.rm = T) / 200
+  ) %>%
+  pivot_longer(cols = c(Above_Zero, Below_Zero), names_to = "Direction", values_to = "Count")
+
+# Plot
+did_results_id <- ggplot() +
+  # Add bars for Above Zero
+  geom_bar(data = filter(bar_data, Direction == "Above_Zero"),
+           aes(x = Year_After_Site, y = Count, fill = "Above Zero"), stat = "identity") +
+  # Add bars for Below Zero
+  geom_bar(data = filter(bar_data, Direction == "Below_Zero"),
+           aes(x = Year_After_Site, y = -Count, fill = "Below Zero"), stat = "identity") +
+  # Add points
+  geom_point(data = longer_results_df,
+             aes(x = Year_After_Site, y = Estimate, color = P_Value_Scaled), size = 2) +
+  # Add color gradient for points
+  scale_color_gradient2(low = "darkgreen", mid = "darkgreen", high = "red", midpoint = median(longer_results_df$P_Value_Scaled, na.rm = T), space = "Lab", name="P-Value (log scale)") +
+  # Adjust the bar fill colors
+  scale_fill_manual(values = c("Above Zero" = "lightblue", "Below Zero" = "lightpink"), name="Count Direction") +
+  # Add zero line
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  # Labels and theme
+  labs(x = "Years After Treatment", y = "Estimate / Count", color = "P-Value (log scale)", fill = "Count Direction") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  coord_flip()  + # Flip coordinates for horizontal bars
+labs(title = "Estimate vs. Years After Site Appearance - DiD (Infant Deaths)",
+     caption = "For Matched County Types",
+     y = "Estimate (% Change Infant Death)",
+     x = "Years After Site Appearance")
+# Save the plot
+ggsave("did_results.png", did_results, width =8, height =5)
+```
+
+```{r}
+# Now do a simulation study
+
+results_df_id_sim <- data.frame(Year = integer(), CountySite = character(), Estimate1 = numeric(), P_Value1 = numeric(),
+                         Estimate2 = numeric(), P_Value2 = numeric(),
+                         Estimate3 = numeric(), P_Value3 = numeric(),
+                         Estimate4 = numeric(), P_Value4 = numeric(),
+                         Estimate5 = numeric(), P_Value5 = numeric())
+for (i in 1:100){
+for (i in 1:length(list_of_dfs)){
+  summarypop_wide_temp <- summarypop_wide %>%
+    filter(Geography %in% list_of_dfs[[i]]$Geography)
+  
+  summarypop_wide_temp <- summarypop_wide_temp %>%
+    left_join(treated_df_joiner, by = c("Geography" = "Geography"))
+  
+  counties_with_site <- summarypop_wide_temp %>%
+    select(Geography, total_sites) %>%
+    unique()
+  
+  counties_without_site <- counties_with_site %>%
+    filter(total_sites == 0)
+  
+  counties_without_site <- counties_without_site$Geography
+  
+  counties_with_site <- counties_with_site %>%
+    filter(total_sites > 0)
+  
+  counties_with_site <- counties_with_site$Geography
+  
+  for (countysite in counties_with_site){
+    # Extract the years
+    yrs_to_loop <- summarypop_wide_temp %>%
+      filter(Geography == countysite) %>%
+      select(years) %>%
+      unique()
+
+     # loop through years
+    for (year in (unlist(strsplit(yrs_to_loop$years[1], ", ")))){
+      random_year <- sample(2000:2015, 1)
+      
+      yrindf <- as.character(random_year)
+      
+      # Create the df to run DiD regression
+      did_df <- summarypop_wide_temp %>%
+        select(Geography, treated, rate, year) %>%
+        filter(Geography %in% c(counties_without_site, c(countysite)))
+      
+      did_df$thepost <- did_df$year >=  yrindf
+      
+      did_df$year_fct <- as.factor(did_df$year)
+
+      # Create a time-since-treatment variable (event time)
+      did_df$time_since_treatment <- did_df$year - as.numeric(yrindf)
+      
+      cap_year <- -5
+      did_df$time_since_treatment <- ifelse(did_df$time_since_treatment < cap_year, cap_year, did_df$time_since_treatment)
+
+      # Calculate the time since treatment
+      did_df <- did_df %>%
+        mutate(
+          time_since_treatment = year - as.numeric(yrindf),
+          # Create a capped time_since_treatment variable for up to 5 years after the treatment
+          capped_time_since_treatment = pmin(time_since_treatment, 5),
+          # Ensure that the capped_time_since_treatment doesn't go below zero
+          capped_time_since_treatment = pmax(capped_time_since_treatment, 0)
+        )
+      
+      # Create the interaction terms
+      for(i in 1:5) {
+        did_df[paste0("post_treatment_year", i)] <- ifelse(did_df$time_since_treatment == i, 1, 0)
+        did_df[paste0("treatedXpost_year", i)] <- did_df$treated * did_df[paste0("post_treatment_year", i)]
+      }
+      
+      # Build the model formula
+      # Start with the rate ~ treated + capped_time_since_treatment
+      model_formula <- "rate ~ treated + capped_time_since_treatment"
+      
+      # Add the interaction terms to the formula
+      for(i in 1:5) {
+        model_formula <- paste(model_formula, paste0("+ treatedXpost_year", i))
+      }
+      
+      # Convert the formula text to an actual formula
+      model_formula <- as.formula(model_formula)
+      
+      # Run the regression model
+      model <- lm(model_formula, data = did_df)
+      
+      # Display the summary of the model
+      summary_model <- summary(model)
+      
+      # Extract the coefficients table
+      coefficients_table <- summary_model$coefficients
+      
+      # Locate the row of the interaction term, which should contain ':'
+      interaction_row1 <- grep("treatedXpost_year1", rownames(coefficients_table))
+      interaction_row2 <- grep("treatedXpost_year2", rownames(coefficients_table))
+      interaction_row3 <- grep("treatedXpost_year3", rownames(coefficients_table))
+      interaction_row4 <- grep("treatedXpost_year4", rownames(coefficients_table))
+      interaction_row5 <- grep("treatedXpost_year5", rownames(coefficients_table))
+      
+      # Extract the estimate and p-value for the interaction term
+      if (length(interaction_row1) > 0) {
+        interaction_estimate1 <- coefficients_table[interaction_row1, "Estimate"]
+        interaction_p_value1 <- coefficients_table[interaction_row1, "Pr(>|t|)"]
+      } else {
+        interaction_estimate1 <- NA
+        interaction_p_value1 <- NA
+      }
+      
+      if (length(interaction_row2) > 0) {
+        interaction_estimate2 <- coefficients_table[interaction_row2, "Estimate"]
+        interaction_p_value2 <- coefficients_table[interaction_row2, "Pr(>|t|)"]
+      } else {
+        interaction_estimate2 <- NA
+        interaction_p_value2 <- NA
+      }
+      
+      if (length(interaction_row3) > 0) {
+        interaction_estimate3 <- coefficients_table[interaction_row3, "Estimate"]
+        interaction_p_value3 <- coefficients_table[interaction_row3, "Pr(>|t|)"]
+      } else {
+        interaction_estimate3 <- NA
+        interaction_p_value3 <- NA
+      }
+      
+      if (length(interaction_row4) > 0) {
+        interaction_estimate4 <- coefficients_table[interaction_row4, "Estimate"]
+        interaction_p_value4 <- coefficients_table[interaction_row4, "Pr(>|t|)"]
+      } else {
+        interaction_estimate4 <- NA
+        interaction_p_value4 <- NA
+      }
+      
+      if (length(interaction_row5) > 0) {
+        interaction_estimate5 <- coefficients_table[interaction_row5, "Estimate"]
+        interaction_p_value5 <- coefficients_table[interaction_row5, "Pr(>|t|)"]
+      } else {
+        interaction_estimate5 <- NA
+        interaction_p_value5 <- NA
+      }
+            
+      
+      
+      if (length(unique(did_df$treated)) > 1){
+        new_row <- data.frame(Year = year, CountySite = countysite, 
+                              Estimate1 = interaction_estimate1, P_Value1 = interaction_p_value1,
+                              Estimate2 = interaction_estimate2, P_Value2 = interaction_p_value2,
+                              Estimate3 = interaction_estimate3, P_Value3 = interaction_p_value3,
+                              Estimate4 = interaction_estimate4, P_Value4 = interaction_p_value4,
+                              Estimate5 = interaction_estimate5, P_Value5 = interaction_p_value5)
+        results_df_id_sim <- rbind(results_df_id_sim, new_row)
+      }
+      
+    }
+    
+  }
+}
+}
+
+longer_results_df <- results_df_id_sim %>%
+  pivot_longer(
+    cols = -c(CountySite, Year), # Exclude identifier columns
+    names_to = c(".value", "number"), # Change 'year' to 'number' to avoid confusion with 'Year' column
+    names_pattern = "(Estimate|P_Value)(\\d+)" # Separate Estimate/P_Value from the number
+  ) %>%
+  mutate(number = as.numeric(number)) %>%
+  rename(Year_After_Site = number) %>%
+  mutate(P_Value_Scaled = -log10(P_Value)) %>%
+  drop_na()# Scale the P_Value for color gradient
+
+bar_data_id_sim <- longer_results_df %>%
+  group_by(Year_After_Site) %>%
+  summarize(
+    Above_Zero = sum(Estimate > 0, na.rm = T) / 100,
+    Below_Zero = sum(Estimate < 0, na.rm = T) / 100
+  ) %>%
+  pivot_longer(cols = c(Above_Zero, Below_Zero), names_to = "Direction", values_to = "Count")
+
+# Plot
+did_results_id_sim <- ggplot() +
+  # Add bars for Above Zero
+  geom_bar(data = filter(bar_data_id, Direction == "Above_Zero"),
+           aes(x = Year_After_Site, y = Count, fill = "Above Zero"), stat = "identity") +
+  # Add bars for Below Zero
+  geom_bar(data = filter(bar_data_id, Direction == "Below_Zero"),
+           aes(x = Year_After_Site, y = -Count, fill = "Below Zero"), stat = "identity") +
+  # Add points
+  geom_point(data = longer_results_df,
+             aes(x = Year_After_Site, y = Estimate, color = P_Value_Scaled), size = 2) +
+  # Add color gradient for points
+  scale_color_gradient2(low = "darkgreen", mid = "darkgreen", high = "red", midpoint = median(longer_results_df$P_Value_Scaled, na.rm = T), space = "Lab", name="P-Value (log scale)") +
+  # Adjust the bar fill colors
+  scale_fill_manual(values = c("Above Zero" = "lightblue", "Below Zero" = "lightpink"), name="Count Direction") +
+  # Add zero line
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  # Labels and theme
+  labs(x = "Years After Treatment", y = "Estimate / Count", color = "P-Value (log scale)", fill = "Count Direction") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  coord_flip()  + # Flip coordinates for horizontal bars
+labs(title = "Estimate vs. Years After Site Appearance - DiD (Infant Deaths), Simulated Randomized Year",
+     caption = "For Matched County Types",
+     y = "Estimate (% Change Infant Death)",
+     x = "Years After Site Appearance")
+
+```
+
+# Test proportion of positve vs. negative
+```{r}
+bar_data$type <- "Experimental"
+bar_data_id_sim$type <- "Simulated"
+
+comb_data <- rbind(bar_data, bar_data_id_sim)
+
+colnames(bar_data)
+
+contingency_tables <- list()
+
+# Loop over the unique years in the 'Year_After_Site' column
+for(year in unique(comb_data$Year_After_Site)) {
+  # Subset the data for the specific year
+  year_data <- subset(comb_data, Year_After_Site == year)
+  
+  # Create a contingency table with 'type' as rows and 'Direction' as columns
+  # Use 'xtabs' to include the 'Count' column as the frequency of occurrences
+  contingency_table <- xtabs(Count ~ type + Direction, data = year_data)
+  
+  # Name the contingency table with the year
+  contingency_tables[[paste("Year", year)]] <- contingency_table
+}
+
+for (table in contingency_tables){
+  print(chisq.test(table))
+}
+```
+
+# Characteristics of Counties with + Estimator by Year
+```{r}
+filtered_char_df <- longer_results_df
+
+filtered_char_df$gt_0 <- filtered_char_df$Estimate > 0
+
+filtered_char_df <- filtered_char_df %>%
+  left_join(summarypop, by = c("CountySite" = "Geography"))
+
+number <- filtered_char_df %>%
+  group_by(Year_After_Site) %>%
+  count()
+
+filtered_char_df %>%
+  left_join(number) %>%
+  group_by(Year_After_Site) %>%
+  mutate(prop = sum(gt_0) / n) %>%
+  ungroup() %>%
+  filter(Year_After_Site == 1 )%>%
+  ggplot(aes(y = Estimate, x = percent_black)) +
+  geom_point()
+
+```
+```{r}
+colnames(filtered_char_df)
+```
+
+
+# Now do with ADRD
+```{r}
+# Prep dataset
+ADRD <- read_xlsx("health/Alzheimers_1999-2022.xlsx", skip = 1) %>%
+  filter(!is.na(Geography)) %>%
+  select(!`Selected Years Total`) %>%
+  pivot_longer(cols = "1999":"2022", values_to = "deaths", names_to = "year")
+
+ADRD$year <- as.numeric(ADRD$year)
+
+ADRD <- ADRD %>%
+  left_join(long_population, by = c("Geography" = "Geography", "year" = "year"))
+
+ADRD$deaths <- str_replace_all(ADRD$deaths, ",", "")
+
+ADRD$deaths <- as.numeric(ADRD$deaths)
+
+ADRD <- ADRD %>%
+  mutate(rate = (deaths / population) * 100)
+
+ADRD$year <- as.numeric(ADRD$year)
+
+ADRD$rate <- str_replace_all(ADRD$rate, ",", "")
+
+# note that lots of NA values
+ADRD$rate <- as.numeric(ADRD$rate)
+
+summarypop_alz <- ADRD %>%
+  left_join(summarypop)
+
+summarypop_long <- summarypop_alz %>%
+  separate_rows(years, sep = ",") %>%
+  mutate(years = as.numeric(years))
+
+summarypop_long <- summarypop_long %>%
+  group_by(Geography, year) %>%
+  mutate(treated = ifelse(!is.na(years) & year >= years, 1, 0)) %>%
+  ungroup()
+
+# Create a 'post' column for each unique 'years' value
+# This will be a wide format dataset where each intervention year has its own 'post' column
+summarypop_wide <- summarypop_long %>%
+  pivot_wider(names_from = years, values_from = treated, names_prefix = "post_")
+
+treated_df_joiner <- summarypop_alz %>%
+  mutate(treated = ifelse(!is.na(years), 1, 0)) %>%
+  select(Geography, years, treated) %>%
+  unique()
+
+# Replace NA with 0 for the 'post_' columns only, which are expected to be numeric
+post_columns <- grep("^post_", names(summarypop_wide), value = TRUE)
+summarypop_wide[post_columns] <- lapply(summarypop_wide[post_columns], function(x) replace(x, is.na(x), 0))
+
+summarypop_wide <- summarypop_wide %>%
+  drop_na()
+```
+
+# Run Stat Tests
+```{r}
+results_df_ADRD <- data.frame(Year = integer(), CountySite = character(), Estimate1 = numeric(), P_Value1 = numeric(),
+                         Estimate2 = numeric(), P_Value2 = numeric(),
+                         Estimate3 = numeric(), P_Value3 = numeric(),
+                         Estimate4 = numeric(), P_Value4 = numeric(),
+                         Estimate5 = numeric(), P_Value5 = numeric())
+
+for (i in 1:length(list_of_dfs)){
+  summarypop_wide_temp <- summarypop_wide %>%
+    filter(Geography %in% list_of_dfs[[i]]$Geography)
+  
+  summarypop_wide_temp <- summarypop_wide_temp %>%
+    left_join(treated_df_joiner, by = c("Geography" = "Geography"))
+  
+  counties_with_site <- summarypop_wide_temp %>%
+    select(Geography, total_sites) %>%
+    unique()
+  
+  counties_without_site <- counties_with_site %>%
+    filter(total_sites == 0)
+  
+  counties_without_site <- counties_without_site$Geography
+  
+  counties_with_site <- counties_with_site %>%
+    filter(total_sites > 0)
+  
+  counties_with_site <- counties_with_site$Geography
+  
+  for (countysite in counties_with_site){
+    # Extract the years
+    yrs_to_loop <- summarypop_wide_temp %>%
+      filter(Geography == countysite) %>%
+      select(years) %>%
+      unique()
+
+     # loop through years
+    for (year in (unlist(strsplit(yrs_to_loop$years[1], ", ")))){
+      yrindf <- year
+      
+      selection_for_post <- paste("post", year, sep = "_")
+      
+      selection_for_post_sym <- rlang::sym(selection_for_post)
+      
+      # Create the df to run DiD regression
+      did_df <- summarypop_wide_temp %>%
+        select(Geography, !!selection_for_post_sym, treated, rate, year) %>%
+        filter(Geography %in% c(counties_without_site, c(countysite)))
+      
+      did_df$thepost <- did_df$year >=  year
+      
+      did_df$year_fct <- as.factor(did_df$year)
+
+      # Create a time-since-treatment variable (event time)
+      did_df$time_since_treatment <- did_df$year - as.numeric(year)
+      
+      cap_year <- -5
+      did_df$time_since_treatment <- ifelse(did_df$time_since_treatment < cap_year, cap_year, did_df$time_since_treatment)
+
+      # Calculate the time since treatment
+      did_df <- did_df %>%
+        mutate(
+          time_since_treatment = year - as.numeric(yrindf),
+          # Create a capped time_since_treatment variable for up to 5 years after the treatment
+          capped_time_since_treatment = pmin(time_since_treatment, 5),
+          # Ensure that the capped_time_since_treatment doesn't go below zero
+          capped_time_since_treatment = pmax(capped_time_since_treatment, 0)
+        )
+      
+      # Create the interaction terms
+      for(i in 1:5) {
+        did_df[paste0("post_treatment_year", i)] <- ifelse(did_df$time_since_treatment == i, 1, 0)
+        did_df[paste0("treatedXpost_year", i)] <- did_df$treated * did_df[paste0("post_treatment_year", i)]
+      }
+      
+      did_df %>%
+        ggplot(aes(x= year, y= rate, color = Geography)) +
+        geom_point()
+      
+      # Build the model formula
+      # Start with the rate ~ treated + capped_time_since_treatment
+      model_formula <- "rate ~ treated + capped_time_since_treatment"
+      
+      # Add the interaction terms to the formula
+      for(i in 1:5) {
+        model_formula <- paste(model_formula, paste0("+ treatedXpost_year", i))
+      }
+      
+      # Convert the formula text to an actual formula
+      model_formula <- as.formula(model_formula)
+      
+      # Run the regression model
+      model <- lm(model_formula, data = did_df)
+      
+      # Display the summary of the model
+      summary_model <- summary(model)
+      
+      # Extract the coefficients table
+      coefficients_table <- summary_model$coefficients
+      
+      # Locate the row of the interaction term, which should contain ':'
+      interaction_row1 <- grep("treatedXpost_year1", rownames(coefficients_table))
+      interaction_row2 <- grep("treatedXpost_year2", rownames(coefficients_table))
+      interaction_row3 <- grep("treatedXpost_year3", rownames(coefficients_table))
+      interaction_row4 <- grep("treatedXpost_year4", rownames(coefficients_table))
+      interaction_row5 <- grep("treatedXpost_year5", rownames(coefficients_table))
+      
+      # Extract the estimate and p-value for the interaction term
+      if (length(interaction_row1) > 0) {
+        interaction_estimate1 <- coefficients_table[interaction_row1, "Estimate"]
+        interaction_p_value1 <- coefficients_table[interaction_row1, "Pr(>|t|)"]
+      } else {
+        interaction_estimate1 <- NA
+        interaction_p_value1 <- NA
+      }
+      
+      if (length(interaction_row2) > 0) {
+        interaction_estimate2 <- coefficients_table[interaction_row2, "Estimate"]
+        interaction_p_value2 <- coefficients_table[interaction_row2, "Pr(>|t|)"]
+      } else {
+        interaction_estimate2 <- NA
+        interaction_p_value2 <- NA
+      }
+      
+      if (length(interaction_row3) > 0) {
+        interaction_estimate3 <- coefficients_table[interaction_row3, "Estimate"]
+        interaction_p_value3 <- coefficients_table[interaction_row3, "Pr(>|t|)"]
+      } else {
+        interaction_estimate3 <- NA
+        interaction_p_value3 <- NA
+      }
+      
+      if (length(interaction_row4) > 0) {
+        interaction_estimate4 <- coefficients_table[interaction_row4, "Estimate"]
+        interaction_p_value4 <- coefficients_table[interaction_row4, "Pr(>|t|)"]
+      } else {
+        interaction_estimate4 <- NA
+        interaction_p_value4 <- NA
+      }
+      
+      if (length(interaction_row5) > 0) {
+        interaction_estimate5 <- coefficients_table[interaction_row5, "Estimate"]
+        interaction_p_value5 <- coefficients_table[interaction_row5, "Pr(>|t|)"]
+      } else {
+        interaction_estimate5 <- NA
+        interaction_p_value5 <- NA
+      }
+      
+      if (length(unique(did_df$treated)) > 1){
+        new_row <- data.frame(Year = year, CountySite = countysite, 
+                              Estimate1 = interaction_estimate1, P_Value1 = interaction_p_value1,
+                              Estimate2 = interaction_estimate2, P_Value2 = interaction_p_value2,
+                              Estimate3 = interaction_estimate3, P_Value3 = interaction_p_value3,
+                              Estimate4 = interaction_estimate4, P_Value4 = interaction_p_value4,
+                              Estimate5 = interaction_estimate5, P_Value5 = interaction_p_value5)
+        results_df_ADRD <- rbind(results_df_ADRD, new_row)
+      }
+    }
+    
+  }
+}
+
+results_df_ADRD
+
+longer_results_df_ADRD <- results_df_ADRD %>%
+  pivot_longer(
+    cols = -c(CountySite, Year), # Exclude identifier columns
+    names_to = c(".value", "number"), # Change 'year' to 'number' to avoid confusion with 'Year' column
+    names_pattern = "(Estimate|P_Value)(\\d+)" # Separate Estimate/P_Value from the number
+  ) %>%
+  mutate(number = as.numeric(number)) %>%
+  rename(Year_After_Site = number) %>%
+  mutate(P_Value_Scaled = -log10(P_Value)) %>%
+  drop_na()# Scale the P_Value for color gradient
+
+bar_data_id_ADRD <- longer_results_df_ADRD %>%
+  group_by(Year_After_Site) %>%
+  summarize(
+    Above_Zero = sum(Estimate > 0, na.rm = T) / 250,
+    Below_Zero = sum(Estimate < 0, na.rm = T) / 250
+  ) %>%
+  pivot_longer(cols = c(Above_Zero, Below_Zero), names_to = "Direction", values_to = "Count")
+
+# Plot
+did_results_ALZ <- ggplot() +
+  # Add bars for Above Zero
+  geom_bar(data = filter(bar_data_id_ADRD, Direction == "Above_Zero"),
+           aes(x = Year_After_Site, y = Count, fill = "Above Zero"), stat = "identity") +
+  # Add bars for Below Zero
+  geom_bar(data = filter(bar_data_id_ADRD, Direction == "Below_Zero"),
+           aes(x = Year_After_Site, y = -Count, fill = "Below Zero"), stat = "identity") +
+  # Add points
+  geom_point(data = longer_results_df_ADRD,
+             aes(x = Year_After_Site, y = Estimate, color = P_Value_Scaled), size = 2) +
+  # Add color gradient for points
+  scale_color_gradient2(low = "darkgreen", mid = "darkgreen", high = "red", midpoint = median(longer_results_df_ADRD$P_Value_Scaled, na.rm = T), space = "Lab", name="P-Value (log scale)") +
+  # Adjust the bar fill colors
+  scale_fill_manual(values = c("Above Zero" = "lightblue", "Below Zero" = "lightpink"), name="Count Direction") +
+  # Add zero line
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  # Labels and theme
+  labs(x = "Years After Treatment", y = "Estimate / Count", color = "P-Value (log scale)", fill = "Count Direction") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  coord_flip()  + # Flip coordinates for horizontal bars
+labs(title = "Estimate vs. Years After Site Appearance - DiD (Alzheimer's Rate)",
+     caption = "For Matched County Types",
+     y = "Estimate (% Change Alzheimer's Rate)",
+     x = "Years After Site Appearance")
+
+ggsave("ALZ.png", did_results_ADRD)
+```
+
+# Final Fig
+```{r}
+library(patchwork)
+
+summary <- did_results_id / (did_results_ADRD + did_results_ALZ) + plot_annotation(title = "DiD Results", tag_levels = "A", tag_suffix  = ")")
+
+ggsave("summary.png", summary, width = 12.5, height = 10)
+```
+
+# Export some stuff
+```{r}
+summarypop
+
+write.csv(summarypop, "count_level_summary.csv")
+
+```
+
+
