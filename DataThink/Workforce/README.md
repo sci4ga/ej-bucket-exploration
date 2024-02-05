@@ -39,14 +39,17 @@ November, 2023
 The raw data is collected and maintained by US Census Bureau.
 
 ### Link to code and instructions for “cleaning”
-
+https://github.com/sci4ga/ej-bucket-exploration/blob/main/DataThink/Workforce/datathink.Rmd
 Further data transformation is made in excel summary files (i.e. poverty_summary.xlsx)
 
 ### Completeness vs. sparsity
 More complete than sparse
 
 ### Link to any code and instructions for data analysis.
-
+https://github.com/sci4ga/ej-bucket-exploration/blob/main/DataThink/Workforce/datathink.Rmd
 
 ### Link to cleaned dataset
+https://sci4ga.sharepoint.com/sites/programming_committee/Shared%20Documents/Forms/AllItems.aspx?ga=1&id=%2Fsites%2Fprogramming%5Fcommittee%2FShared%20Documents%2FData%20Focused%20Programs%2Femory%20data%20science%202023%2D24%2FData%20Think%20%2D%20Fall%2023%2FDatasets%2FWorkforce%20Development&viewid=5cdfb080%2D5731%2D46bd%2D993a%2D197bb56ae965
+
 ### Link to GitHub Repository for READMEs, code, etc.
+https://github.com/sci4ga/ej-bucket-exploration/tree/main/DataThink/Workforce
