@@ -1,0 +1,314 @@
+---
+title: "datathink"
+author: "Michael Wang"
+date: '2023-11-04'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+data_linguistic = read_excel("./data/linguistic_summary.xlsx")
+data_ga_summary = read_excel("./data/data_summary_ga.xlsx")
+
+colnames(data_ga_summary)[1] = "year"
+data_ga_summary$year = as.character(data_ga_summary$year)
+data_ga_summary
+```
+
+
+
+```{r}
+data_ga_summary%>%
+  ggplot()+
+  geom_point(aes(y = below_poverty_level, x = year))+
+  geom_line(aes(y = below_poverty_level, x = year), group = 1)+
+  labs(title = "Percentage below poverty level change from 2010 to 2022 in Georgia")
+```
+
+```{r}
+data_ga_summary%>%
+  ggplot(aes(y = linguistic_isolation, x = year))+
+  geom_point()+
+  geom_line(group = 1)+
+  labs(title = "Percentage of linguistic isolation change from 2010 to 2022 in Georgia")
+```
+
+```{r}
+data_ga_summary%>%
+  ggplot(aes(y = median_income_diff, x = year))+
+  geom_point()+
+  geom_line(group = 1)+
+  labs(title = "Percentage of median income difference change from 2010 to 2022 in Georgia")
+```
+
+
+```{r}
+toDelete <- seq(1, nrow(data_linguistic), 2)
+data_linguistic_1 = data_linguistic[ toDelete ,]
+data_linguistic_county = data_linguistic_1[-c(1,2),]
+colnames(data_linguistic_county)[1] = "county"
+data_linguistic_county$`2010`= as.double(data_linguistic_county$`2010`)
+data_linguistic_county$`2011`= as.double(data_linguistic_county$`2011`)
+data_linguistic_county$`2012`= as.double(data_linguistic_county$`2012`)
+data_linguistic_county$`2013`= as.double(data_linguistic_county$`2013`)
+data_linguistic_county$`2014`= as.double(data_linguistic_county$`2014`)
+data_linguistic_county$`2015`= as.double(data_linguistic_county$`2015`)
+data_linguistic_county$`2016`= as.double(data_linguistic_county$`2016`)
+data_linguistic_county$`2017`= as.double(data_linguistic_county$`2017`)
+data_linguistic_county$`2018`= as.double(data_linguistic_county$`2018`)
+data_linguistic_county$`2019`= as.double(data_linguistic_county$`2019`)
+
+data_linguistic_county$`2020`= as.double(data_linguistic_county$`2020`)
+data_linguistic_county$`2021`= as.double(data_linguistic_county$`2021`)
+data_linguistic_county$`2022`= as.double(data_linguistic_county$`2022`)
+```
+
+```{r}
+data_linguistic_county%>%
+  ggplot(aes(x = county, y = `2022`))+
+  geom_bar(stat = 'identity')+
+  coord_flip()+labs(title = "Linguistic Isolation of Each County in GA in 2022")
+```
+```{r}
+#Import data into a Data frame
+data <- c("
+Port    Category    2006    2007    2008    2009    2010     2011    2012
+a       IntPass     9046000 0       9579000 9683700 10404900 0       0
+a       Pass        270000  260000  360000  360000  342000   385000  368000
+a       Cruise      259     238     269     263     247      258     265
+b       IntPass     8249304 8222336 8692362 9015726 9107665  9177075 9050424
+b       Pass        0       272584  351267  437437  381141   407162  463770
+b       Cruise      260     255     265     293     261      263     274
+c       IntPass     6760000 6514294 7247366 7257646 7900000 8500000  8800000
+c       Pass        305026  294738  377522  416605  392000  443000   442000
+c       Cruise      289     268     298     305     279     293      294
+")
+traff <- read.table(text = data, header=TRUE)
+
+#Reshape the data for ggplot
+traff2 <- melt(traff,id=c("Port","Category"),variable.name = "Year")
+
+#Remove the X in the Year column and convert it to number
+traff2$Year <- as.numeric(gsub(pattern="X",replacement = "",x = as.character(traff2$Year)))
+
+#The data is ready for ggplot
+head(traff2)
+
+#ggplot it...
+ggplot(traff2, aes(x = Year, y = value, color = Port))+
+facet_grid(facets = Category~., scales = "free_y")+
+  geom_line()+theme_bw()
+```
+
+
+
+```{r}
+library(reshape2)
+
+#Reshape the data for ggplot
+data_2 <- melt(data_linguistic_county,id="county",variable.name = "Year")
+
+#Remove the X in the Year column and convert it to number
+
+#ggplot it...
+ggplot(data_2, aes(x = Year, y = value, color = county))+
+  geom_line(group = 1)+theme_bw()
+```
+
+```{r}
+lin_t = read_excel("./data/linguistic_transpose.xlsx")
+lin_t$`Barrow County` = as.double(lin_t$`Barrow County`)
+lin_t$year = as.character(lin_t$year)
+```
+
+```{r}
+lin_t%>%
+  ggplot(aes(x = year))+
+  geom_line(aes(y = `Barrow County`))+
+  geom_line(aes(y = `Bartow County`))+
+  scale_x_discrete()
+```
+
+
+```{r}
+library(usmap)  
+library(ggplot2)  
+plot_usmap( data = carrierdata, values = "Count", "counties", include = c("GA"), color="black") +  
+    labs(title="Georgia")+  
+    
+    theme(plot.background=element_rect(), legend.position="right")  
+```
+
+```{r}
+water_discharge = read_excel("./data/water.xlsx")
+water_discharge = na.omit(water_discharge)
+
+water_discharge$`Wastewater discharge` = as.numeric(water_discharge$`Wastewater discharge`)
+
+
+water_discharge_1 = water_discharge%>%
+  group_by(`County Name`)%>%
+  summarize(mu_waste = mean(`Wastewater discharge`, na.rm = TRUE))
+
+write_csv(water_discharge_1, "./data/water_discharge_ga.csv")
+```
+
+```{r}
+ga_2010 <-  read_excel("./data/ga_2010_county.xlsx")
+```
+
+```{r}
+ga_2010_NO <- ga_2010[-25,]
+```
+
+```{r}
+lm_model = lm(data = ga_2010, mu_waterwaste ~ median_income+linguistic*median_income+poverty*median_income+I(linguistic^2)+I(poverty^2)+linguistic*poverty)
+summary(lm_model)
+```
+```{r}
+ga_2010%>%
+  ggplot(aes(x=is_below_median, y = mu_waterwaste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "waterwaste ~ is_below_median")
+```
+
+```{r}
+ga_2010_NO%>%
+  ggplot(aes(x=is_below_median, y = mu_waterwaste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "waterwaste ~ is_below_median (outlier removed)")
+```
+
+```{r}
+ga_2010%>%
+  ggplot(aes(x=linguistic, y = mu_waterwaste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "waterwaste ~ linguistic")
+```
+
+```{r}
+ga_2010_NO%>%
+  ggplot(aes(x=linguistic, y = mu_waterwaste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "waterwaste ~ linguistic (outlier removed)")
+```
+
+```{r}
+ga_2010%>%
+  ggplot(aes(x=poverty, y = median_income))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "median_income ~ poverty")
+
+summary(lm(data = ga_2010, median_income~poverty))
+```
+
+
+```{r}
+ga_2010%>%
+  ggplot(aes(x= linguistic, y = median_income))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "median_income ~ linguistic")
+```
+
+```{r}
+ga_2022 <- read_excel("./data/ga_2022_county.xlsx")
+```
+
+```{r}
+ga_2022%>%
+  ggplot(aes(x= linguistic, y = poverty))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "poverty~linguistic")
+
+summary(lm(data = ga_2022, poverty~linguistic))
+```
+
+```{r}
+ga_2022 <- ga_2022%>%
+  arrange(desc(mu_waste))
+
+ga_2022 <- ga_2022[1:12,]
+```
+
+Top 5 Water waste: Fulton County, DeKalb County, Bibb County, Muscogee County, Henry County.
+lower 7 water waste: Gwinnett County, Richmond County, Carroll County, Chatham County, Columbia County, Hall County, Liberty County
+
+```{r}
+high_waste = ga_2022[1:5,]
+low_waste = ga_2022[6:12,]
+
+```
+
+```{r}
+ling_high = median(ga_2022[1:5,]$linguistic)
+ling_low = median(ga_2022[6:12,]$linguistic)
+```
+
+```{r}
+pov_high = median(ga_2022[1:5,]$poverty)
+pov_low = median(ga_2022[6:12,]$poverty)
+```
+
+```{r}
+medincome_high = median(ga_2022[1:5,]$median_income)
+medincome_low = median(ga_2022[6:12,]$median_income)
+```
+
+
+```{r}
+
+ga_2022%>%
+  ggplot(aes(x= poverty, y = median_income))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "median_income~poverty")
+
+summary(lm(data = ga_2022, median_income~poverty))
+```
+
+
+```{r}
+ga_2022%>%
+  ggplot(aes(x= linguistic, y = mu_waste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "mu_waste~linguistic")
+
+summary(lm(data = ga_2022, mu_waste~linguistic))
+```
+
+```{r}
+ga_2022%>%
+  ggplot(aes(x= median_income, y = mu_waste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "mu_waste~median_income")
+
+summary(lm(data = ga_2022, mu_waste~median_income))
+```
+
+```{r}
+ga_2022%>%
+  ggplot(aes(x= poverty, y = mu_waste))+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  labs(title = "mu_waste~poverty")
+
+summary(lm(data = ga_2022, mu_waste~poverty))
+```
+
