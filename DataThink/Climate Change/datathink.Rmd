@@ -1,0 +1,200 @@
+---
+title: "DataThink"
+author: "Jiaqi"
+date: '2023-10-21'
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(sf)
+library(RColorBrewer)
+
+cejst=read.csv("./cejst/cejst_edit.csv")
+
+shape=read_sf("./Census tract shapefile/tl_2020_13_tract.shp") 
+sites=read.csv("./sites_of_interest.csv")
+
+
+
+```
+
+
+Data cleaning
+
+```{r}
+#filter for only Georgia
+cejst =cejst %>% filter(State.Territory=="Georgia") %>% 
+  mutate(County.Name=
+  str_remove_all(County.Name, " County")
+)
+
+
+#Fixing NA issue for ag
+cejst$Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index...percentile.[is.na(cejst$Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index...percentile.) & cejst$Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index. == 0] <- 0
+
+#Fixing NA issue for 
+cejst$Expected.population.loss.rate..Natural.Hazards.Risk.Index...percentile.[is.na(cejst$Expected.population.loss.rate..Natural.Hazards.Risk.Index...percentile.) & cejst$Expected.population.loss.rate..Natural.Hazards.Risk.Index. == 0] <- 0
+
+#Get rid of NA
+cejst=cejst[complete.cases(cejst), ]
+
+```
+
+
+
+Data exploration
+
+```{r}
+summary(cejst$Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index.)
+summary(cejst$Expected.building.loss.rate..Natural.Hazards.Risk.Index.)
+summary(cejst$Share.of.properties.at.risk.of.flood.in.30.years)
+summary(cejst$Share.of.properties.at.risk.of.fire.in.30.years)
+summary(cejst$Expected.population.loss.rate..Natural.Hazards.Risk.Index.)
+```
+
+
+
+```{r}
+hist(cejst$Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index.)
+hist(cejst$Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index...percentile.)
+hist(cejst$Expected.building.loss.rate..Natural.Hazards.Risk.Index.)
+hist(cejst$Expected.building.loss.rate..Natural.Hazards.Risk.Index...percentile.)
+hist(cejst$Share.of.properties.at.risk.of.flood.in.30.years..percentile.)
+hist(cejst$Share.of.properties.at.risk.of.flood.in.30.years)
+hist(cejst$Share.of.properties.at.risk.of.fire.in.30.years)
+hist(cejst$Share.of.properties.at.risk.of.fire.in.30.years..percentile.)
+hist(cejst$Expected.population.loss.rate..Natural.Hazards.Risk.Index.)
+hist(cejst$Expected.population.loss.rate..Natural.Hazards.Risk.Index...percentile.)
+
+```
+
+```{r}
+cejstsum=cejst %>% 
+  mutate(sum=Greater.than.or.equal.to.the.90th.percentile.for.share.of.properties.at.risk.of.flood.in.30.years.and.is.low.income.+ Greater.than.or.equal.to.the.90th.percentile.for.expected.population.loss.rate.and.is.low.income.+ Greater.than.or.equal.to.the.90th.percentile.for.share.of.properties.at.risk.of.fire.in.30.years.and.is.low.income.+ Greater.than.or.equal.to.the.90th.percentile.for.expected.building.loss.rate.and.is.low.income.+ Greater.than.or.equal.to.the.90th.percentile.for.expected.agriculture.loss.rate.and.is.low.income.) %>% 
+  mutate(sum1=as.factor(sum))%>% 
+  mutate(Census.tract.2010.ID=as.character(Census.tract.2010.ID))
+
+
+cejstshape=shape %>% left_join(cejstsum,by=c("GEOID"="Census.tract.2010.ID"))
+sites_sf <- st_as_sf(sites, coords = c("Longitude", "Lattitude"), crs = st_crs(cejstshape))
+
+intersected <- st_intersection(cejstshape[cejstshape$sum >0, ], sites_sf)
+```
+
+
+```{r}
+plot1=cejstsum %>% 
+ # filter(sum>0) %>% 
+  group_by(sum) %>% 
+  summarise(n=n()) %>% 
+  ggplot(aes(x=sum,y=n))+
+  geom_col()+
+  geom_text(aes(label=n),vjust=-0.5)+
+  theme_minimal()+
+  theme(axis.title.y=element_blank())+
+  labs(x = "Sum of Critical Climate Change Issue per Census Tract")
+```
+
+```{r}
+cejst %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.expected.population.loss.rate.and.is.low.income.==TRUE) %>% 
+  summarise(n=n())
+
+cejst %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.share.of.properties.at.risk.of.flood.in.30.years.and.is.low.income.==TRUE) %>% 
+  summarise(n=n())
+
+cejst %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.share.of.properties.at.risk.of.fire.in.30.years.and.is.low.income.==TRUE) %>% 
+  summarise(n=n())
+
+cejst %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.expected.building.loss.rate.and.is.low.income.==TRUE) %>% 
+  summarise(n=n())
+
+cejst %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.expected.agriculture.loss.rate.and.is.low.income.==TRUE) %>% 
+  summarise(n=n())
+```
+
+```{r}
+cejstsum %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.expected.population.loss.rate.and.is.low.income.==TRUE) %>% 
+  ggplot()+
+  geom_histogram(aes(x=Expected.population.loss.rate..Natural.Hazards.Risk.Index.,fill=sum1))+
+  theme_minimal()+
+  labs(fill="Critical Regions",y="")
+
+cejstsum %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.share.of.properties.at.risk.of.flood.in.30.years.and.is.low.income.==TRUE) %>% 
+  ggplot()+
+  geom_histogram(aes(x=Share.of.properties.at.risk.of.flood.in.30.years,fill=sum1))+
+  theme_minimal()+
+  labs(fill="Critical Regions",y="")
+
+cejstsum %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.share.of.properties.at.risk.of.fire.in.30.years.and.is.low.income.==TRUE) %>% 
+  ggplot()+
+  geom_histogram(aes(x=Share.of.properties.at.risk.of.fire.in.30.years,fill=sum1))+
+  theme_minimal()+
+  labs(fill="Critical Regions",y="")
+
+cejstsum %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.expected.building.loss.rate.and.is.low.income.==TRUE) %>% 
+  ggplot()+
+  geom_histogram(aes(x=Expected.building.loss.rate..Natural.Hazards.Risk.Index.,fill=sum1))+
+  theme_minimal()+
+  labs(fill="Critical Regions",y="")
+
+cejstsum %>% 
+  filter(Greater.than.or.equal.to.the.90th.percentile.for.expected.agriculture.loss.rate.and.is.low.income.==TRUE) %>% 
+  ggplot()+
+  geom_histogram(aes(x=Expected.agricultural.loss.rate..Natural.Hazards.Risk.Index.,fill=sum1))+
+  theme_minimal()+
+  labs(fill="Critical Regions",y="")
+```
+
+
+
+```{r}
+cejstsum %>% 
+     filter(sum==1&Greater.than.or.equal.to.the.90th.percentile.for.leaky.underground.storage.tanks.and.is.low.income.==TRUE)
+
+cejstsum %>% 
+     filter(sum==1&Greater.than.or.equal.to.the.90th.percentile.for.wastewater.discharge.and.is.low.income.==TRUE)
+
+```
+
+```{r}
+cejstshape %>% 
+ggplot()+
+  geom_sf(aes(fill=factor(sum)))+
+  geom_sf(data=sites_sf)+
+  labs(fill="Critical Region #")+
+   scale_fill_manual(values = c("NA" = "gray", "0" = "#FFCC00", "1" = "#FF6600", "2" = "#FF0000")) +
+  theme_minimal()
+
+
+
+ggplot()+
+  geom_sf(data=cejstshape, aes(fill=Greater.than.or.equal.to.the.90th.percentile.for.wastewater.discharge.and.is.low.income.))+
+  geom_sf(data = intersected)+
+  labs(fill="Dangerous Waste Water Census Tract")+
+  theme_minimal()
+```
+
+```{r}
+cejstsum = cejstsum %>% 
+  mutate(sum=as.integer(sum))
+lm=lm(sum~Expected.population.loss.rate..Natural.Hazards.Risk.Index.+ Share.of.properties.at.risk.of.fire.in.30.years, data=cejstsum)
+
+summary(lm)
+
+
+lm1=lm(Greater.than.or.equal.to.the.90th.percentile.for.wastewater.discharge.and.is.low.income.~Expected.population.loss.rate..Natural.Hazards.Risk.Index.+ Share.of.properties.at.risk.of.fire.in.30.years, data=cejstsum)
+
+summary(lm1)
+```
+
